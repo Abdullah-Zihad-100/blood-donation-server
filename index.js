@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 app.use(
   cors({
-    origin: "*", // Frontend origin
+    origin: "http://localhost:5173", // Frontend origin
     credentials: true,
   })
 );
@@ -264,15 +264,11 @@ sendEmail(process.env.EMAIL_USER, {
       res.send(result);
     });
 
-
     // get donors----->
     app.get("/donors", async (req, res) => {
       const result = await donorsCollaction.find().toArray();
       res.send(result);
-      console.log(result);
     });
-
-
 
     // get single donor------->
     app.get("/donators/details/:id", verifyToken, async (req, res) => {
