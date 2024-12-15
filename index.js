@@ -5,6 +5,9 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const app = express();
 const port = process.env.PORT || 5000;
+const jwt = require("jsonwebtoken");
+const nodemailer = require("nodemailer");
+
 // const jwt = require("jsonwebtoken");
 
 app.use(
@@ -12,8 +15,25 @@ app.use(
     origin: "http://localhost:5173", // Frontend origin
     credentials: true,
   })
-);app.use(cookieParser());
+);
+app.use(cookieParser());
 app.use(express.json());
+
+// middelware----->
+
+const verifyToken = (req, res, next) => {
+  const token = req?.cookies?.token;
+  if (!token) {
+    res.status(402).send({ message: "unauthorized access" });
+  }
+  jwt.verify(token, process.env.SECRET, (err, decoded) => {
+    if (err) {
+      res.status(402).send({ message: "unauthorized access" });
+    }
+    req.user = decoded;
+    next();
+  });
+};
 
 const uri = `mongodb+srv://${process.env.USER_NAME}:${process.env.USER_PASS}@cluster0.hmqrzhm.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -32,12 +52,217 @@ async function run() {
     await client.connect();
     // collactions---------->
     const donorsCollaction = client.db("Blood-Donation").collection("donors");
+    const usersCollaction = client.db("Blood-Donation").collection("users");
+    const reviewsCollaction = client.db("Blood-Donation").collection("reviews");
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
+
+    // send email
+    const sendEmail = (emailAddress, emailData) => {
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        host: "smtp.gmail.com",
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+      });
+      transporter.verify((error, success) => {
+        if (error) {
+          console.log(error);
+        } else {
+          console.log("Server is reday to take our message", success);
+        }
+      });
+      const mailBody = {
+        from: process.env.EMAIL_USER,
+        to: emailAddress,
+        subject: emailData?.subject,
+        html: `<p>${emailData?.message}</p>`,
+      };
+      transporter.sendMail(mailBody, (error, info) => {
+        if (error) {
+          console.log(error);
+        } else {
+          console.log("Email sent", +info.response);
+        }
+      });
+    };
+
+
+
+
+
+
+    app.post("/sendReq", async (req, res) => {
+      const {details} = req.body;
+      console.log(details);
+
+      sendEmail(details?.email, {
+        subject: "Urgent Blood Donation Request",
+        message: `Dear Donor,
+
+We hope this email finds you well. We are reaching out to inform you about an urgent need for blood donation and your incredible generosity could save a life.
+
+**Patient Name:** ${details?.patientName}  
+**Hospital Name:** ${details?.hospitalName}  
+**Current Location:** ${details?.currentLocation}  
+**Contact Number:** ${details?.contactNumber}
+
+Your selfless act of donating blood has the potential to provide a second chance to someone in need. Every drop counts, and your contribution would mean the world to the patient and their loved ones.
+
+If you are available to donate, please reach out as soon as possible to the provided contact number or visit the hospital mentioned above. Your prompt response can make a life-saving difference.
+
+Thank you for being a beacon of hope and for your continued support in this noble cause.
+
+Warm regards,  
+**Compact Blood Donation Team**`,
+      });
+    });
+
+
+
+    app.post("/contactDetails",async(req,res)=>{
+      const {user}=req.body;
+console.log(user);
+sendEmail(process.env.EMAIL_USER, {
+  subject: "Try To Contact A User",
+  message: `Name: ${user?.name},Email: ${user?.email} , Contact Number: ${user?.contactNumber}`
+});
+  res.send({ message: "Contact details saved successfully!" });
+    })
+
+
+
+
+    
+    // JWT Post genarate------->
+
+    app.post("/jwt", (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.SECRET, { expiresIn: "365d" });
+      res
+        .cookie("token", token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        })
+        .send({ success: true });
+      // console.log(token);
+    });
+    app.get("/logout", (req, res) => {
+      try {
+        res
+          .clearCookie("token", {
+            maxAge: 0,
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+          })
+          .send({ success: true });
+      } catch (err) {
+        res.status(400).send(err);
+      }
+    });
+
+    app.get("/users", async (req, res) => {
+      const result = await usersCollaction.find().toArray();
+      res.send(result);
+    });
+
+    // delete user--------->
+
+    app.delete("/user/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = usersCollaction.deleteOne(query);
+      res.send(result);
+    });
+
+    // get admin ------>
+
+    app.get("/user/:email", async (req, res) => {
+      const email = req.params.email;
+      // console.log(email);
+      const result = await usersCollaction.findOne({ email });
+      // console.log("Query result", result);
+      res.send(result);
+    });
+
+    // user save database----------->
+    app.put("/save-user", async (req, res) => {
+      const { user, role } = req.body;
+      const email = user?.email;
+      const query = await usersCollaction.findOne({ email });
+
+      if (query) {
+        return res.status(200).json({ message: "User already exists" });
+      }
+      user.role = role || "role";
+      const result = await usersCollaction.insertOne(user);
+      return res.send(result);
+    });
+
+    // update role users to dantor----->
+
+    app.patch("/save-as-a-donator", async (req, res) => {
+      try {
+        const { email } = req.body;
+
+        // Validate email
+        if (!email) {
+          return res
+            .status(400)
+            .send({ success: false, message: "Email is required" });
+        }
+
+        // Find the user by email
+        const user = await usersCollaction.findOne({ email });
+        if (!user) {
+          return res
+            .status(404)
+            .send({ success: false, message: "User not found" });
+        }
+
+        // Toggle role based on current role
+        const newRole = user?.role === "donator" ? "user" : "donator";
+
+        // Update the user's role
+        const updateDoc = { $set: { role: newRole } };
+        console.log(updateDoc);
+        const result = await usersCollaction.updateOne({ email }, updateDoc);
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(500)
+            .send({ success: false, message: "Failed to update role" });
+        }
+
+        res.send({
+          success: true,
+          message: `Role updated successfully to ${newRole}`,
+          newRole,
+        });
+      } catch (error) {
+        console.error("Error toggling role:", error);
+        res.status(500).send({
+          success: false,
+          message: "Internal server error",
+        });
+      }
+    });
+
+    // get all users -------->
+    app.get("/users", async (req, res) => {
+      const result = await usersCollaction.find().toArray();
+      res.send(result);
+    });
 
     // get donors----->
     app.get("/donors", async (req, res) => {
@@ -46,13 +271,55 @@ async function run() {
     });
 
     // get single donor------->
-
-
-    app.get("/donors/:id",async(req,res)=>{
-      const id=req.params.id;
+    app.get("/donators/details/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
       const result = await donorsCollaction.findOne({ _id: new ObjectId(id) });
       res.send(result);
-    })
+    });
+
+    // get for my prfile ------>
+
+    app.get("/profile-donors", async (req, res) => {
+      const { email } = req.query;
+      if (!email) {
+        return res
+          .status(400)
+          .send({ success: false, message: "Email is required" });
+      }
+      const result = await donorsCollaction.findOne({ email });
+      // Add logic to find the donor by email and respond
+      res.send({ success: true, donor: result });
+    });
+
+    //  edit profile----------->
+
+    app.put("/edit-profile/:id", async (req, res) => {
+      const id = req.params.id;
+      const donorData = req.body.donorData;
+      console.log("prfile-Id", id);
+      if (!id || !donorData) {
+        return res
+          .status(400)
+          .send({ success: false, message: "Invalid data" });
+      }
+      try {
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = { $set: donorData };
+        console.log(updateDoc);
+        const result = await donorsCollaction.updateOne(query, updateDoc);
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Donor not found" });
+        }
+        res.send({ success: true, result });
+      } catch (error) {
+        console.error("Error updating profile:", error);
+        res
+          .status(500)
+          .send({ success: false, message: "Update failed", error });
+      }
+    });
 
     // post a donor
     app.post("/donors", async (req, res) => {
@@ -61,6 +328,56 @@ async function run() {
       res.send(result);
     });
 
+    // delete donor
+
+    app.delete("/donors/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = donorsCollaction.deleteOne(query);
+      res.send(result);
+    });
+
+    // update role
+
+    app.put("/update-role/:id", async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: { role: role },
+      };
+      const result = usersCollaction.updateOne(query, updateDoc);
+      console.log(id, role);
+      res.send(result);
+    });
+
+    // admin state ------->
+
+    app.get("/admin-state", async (req, res) => {
+      const userCount = await usersCollaction.countDocuments(); // Verify collection name
+      const donatorCount = await donorsCollaction.countDocuments(); // Verify collection name
+      res.send({ userCount, donatorCount }); //
+    });
+
+    app.get("/reviews", async (req, res) => {
+      const result = await reviewsCollaction.find().toArray();
+      res.send(result);
+    });
+
+    app.post("/reviews", async (req, res) => {
+      const review = req.body;
+      const result = await reviewsCollaction.insertOne(review);
+      res.send(result);
+    });
+
+    // delete reviews
+
+    app.delete("/review/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = reviewsCollaction.deleteOne(query);
+      res.send(result);
+    });
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
