@@ -13,7 +13,7 @@ const nodemailer = require("nodemailer");
 // { http://localhost:5173 }
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: "https://blood-donation-1-6920a.web.app",
     credentials: true,
   })
 );
