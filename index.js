@@ -118,6 +118,7 @@ We hope this email finds you well. We are reaching out to inform you about an ur
 **Hospital Name:** ${details?.hospitalName}  
 **Current Location:** ${details?.currentLocation}  
 **Contact Number:** ${details?.contactNumber}
+**Date and Time:** ${details?.dateTime}
  
 Your selfless act of donating blood has the potential to provide a second chance to someone in need. Every drop counts, and your contribution would mean the world to the patient and their loved ones.
  
@@ -170,7 +171,8 @@ Warm regards,
         .cookie("token", token, {
           httpOnly: true,
           secure: true, // Secure cookies only in production
-          sameSite: "none", // Use 'none' in production, 'strict' locally
+          sameSite: "none",
+          expires: new Date(Date.now() + 6 * 30 * 24 * 60 * 60 * 1000), // 6 months
         })
         .send({ success: true });
     });
